@@ -425,7 +425,8 @@
 
     function escapeCsv(val) {
       const s = String(val ?? "");
-      if (/[";\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      if (/[";
+]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
       return s;
     }
 
@@ -544,6 +545,23 @@
           </tr>
         `).join("");
       }
+    function render() {
+      const tbody = document.getElementById("tbody");
+      if (!entries.length) {
+        tbody.innerHTML = `<tr><td colspan="7">Keine lokalen Einträge vorhanden.</td></tr>`;
+      } else {
+        tbody.innerHTML = entries.map(e => `
+          <tr>
+            <td>${escHtml(formatDateDe(e.datum))}</td>
+            <td>${escHtml(e.titel)}</td>
+            <td><span class="tag">${escHtml(e.kategorie)}</span></td>
+            <td>${escHtml(numberDe(e.wert))}</td>
+            <td>${escHtml(e.einheit)}</td>
+            <td>${escHtml(e.notiz)}</td>
+            <td><button class="btn-secondary" onclick="removeEntry(${e.id})">Löschen</button></td>
+          </tr>
+        `).join("");
+      }
 
       const sum = entries.reduce((acc, e) => acc + (Number(e.wert) || 0), 0);
       const cats = new Set(entries.map(e => e.kategorie || "").filter(Boolean));
@@ -555,7 +573,8 @@
     function buildCsv(rows) {
       const header = ["Datum", "Titel", "Kategorie", "Wert", "Einheit", "Notiz"];
       const csvRows = rows.map(r => [r.datum, r.titel, r.kategorie, String(r.wert).replace(".", ","), r.einheit, r.notiz]);
-      return [header, ...csvRows].map(row => row.map(escapeCsv).join(";")).join("\n");
+      return [header, ...csvRows].map(row => row.map(escapeCsv).join(";")).join("
+");
     }
 
     function exportLocalCsv() {
@@ -631,7 +650,8 @@
         setStatus("Schreibe CSV nach GitHub ...");
         await putFile(owner, repo, path, branch, token, mergedCsv, sha);
         setStatus(
-          "GitHub-Speicherung erfolgreich.\n" +
+          "GitHub-Speicherung erfolgreich.
+" +
           "Die Workflow-Datei im Repository erzeugt im nächsten Schritt automatisch die Excel-Datei in auswertung/auswertung.xlsx."
         );
       } catch (err) {
@@ -670,12 +690,14 @@
           escapeCsv(r.Notiz),
         ].join(";"));
       });
-      return lines.join("\n");
+      return lines.join("
+");
     }
 
     function parseCsvSimple(csvText) {
       if (!csvText || !csvText.trim()) return [];
-      const lines = csvText.replace(/\r/g, "").split("\n").filter(Boolean);
+      const lines = csvText.replace(/\r/g, "").split("
+").filter(Boolean);
       if (!lines.length) return [];
       const headers = parseCsvLine(lines[0]);
       return lines.slice(1).map(line => {
@@ -739,7 +761,255 @@
       const data = await resp.json();
       let content = data.content || "";
       if (data.encoding === "base64") {
-        content = decodeBase64Utf8(content.replace(/\n/g, ""));
+        content = decodeBase64Utf8(content.replace(/
+/g, ""));
+      }
+      return { exists: true, sha: data.sha, content };
+    }
+
+      };
+      if (sha) payload.sha = sha;
+    async function putFile(owner, repo, path, branch, token, textContent, sha) {
+      const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path}`;
+      const payload = {
+        message: `Daten aktualisiert ${new Date().toISOString()}`,
+        content: encodeBase64Utf8(textContent),
+        branch,
+      };
+      if (sha) payload.sha = sha;
+
+      const resp = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Schreiben fehlgeschlagen (${resp.status}): ${txt}`);
+      }
+
+      return resp.json();
+    }
+
+    function encodeBase64Utf8(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = "";
+      bytes.forEach(b => binary += String.fromCharCode(b));
+      return btoa(binary);
+    }
+
+    function decodeBase64Utf8(base64) {
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+  </script>
+      const sum = entries.reduce((acc, e) => acc + (Number(e.wert) || 0), 0);
+      const cats = new Set(entries.map(e => e.kategorie || "").filter(Boolean));
+      document.getElementById("statCount").textContent = String(entries.length);
+      document.getElementById("statSum").textContent = numberDe(sum);
+      document.getElementById("statCats").textContent = String(cats.size);
+    }
+
+    function buildCsv(rows) {
+      const header = ["Datum", "Titel", "Kategorie", "Wert", "Einheit", "Notiz"];
+      const csvRows = rows.map(r => [r.datum, r.titel, r.kategorie, String(r.wert).replace(".", ","), r.einheit, r.notiz]);
+      return [header, ...csvRows].map(row => row.map(escapeCsv).join(";")).join("
+");
+    }
+
+    function exportLocalCsv() {
+      const csv = buildCsv(entries);
+      downloadFile("erfassung.csv", csv, "text/csv;charset=utf-8");
+      setStatus("CSV lokal exportiert.");
+    }
+
+    function downloadFile(filename, content, type) {
+      const blob = new Blob([content], { type: type || "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function saveToGitHub() {
+      if (!entries.length) {
+        alert("Es sind keine lokalen Einträge vorhanden.");
+        return;
+      }
+
+      const owner = document.getElementById("repoOwner").value.trim();
+      const repo = document.getElementById("repoName").value.trim();
+      const branch = document.getElementById("branchName").value.trim() || "main";
+      const path = document.getElementById("csvPath").value.trim() || "daten/erfassung.csv";
+      const token = document.getElementById("token").value.trim();
+
+      if (!owner || !repo || !path || !token) {
+        alert("Bitte Owner, Repository, CSV-Pfad und Token eingeben.");
+        return;
+      }
+
+      saveSettings();
+      setStatus("Lese bestehende CSV aus GitHub ...");
+
+      try {
+        const existing = await getExistingFile(owner, repo, path, branch, token);
+        let currentCsv = "";
+        let sha = null;
+
+        if (existing.exists) {
+          sha = existing.sha;
+          currentCsv = existing.content;
+        }
+
+        const existingRows = parseCsvSimple(currentCsv);
+        const newRows = entries.map(e => ({
+          Datum: e.datum,
+          Titel: e.titel,
+          Kategorie: e.kategorie,
+          Wert: String(e.wert).replace(".", ","),
+          Einheit: e.einheit,
+          Notiz: e.notiz,
+        }));
+
+        const normalizedExisting = normalizeRows(existingRows);
+        const normalizedNew = normalizeRows(newRows);
+
+        const merged = [...normalizedExisting];
+        const existingKeys = new Set(normalizedExisting.map(rowKey));
+        for (const r of normalizedNew) {
+          const key = rowKey(r);
+          if (!existingKeys.has(key)) {
+            merged.push(r);
+            existingKeys.add(key);
+          }
+        }
+
+        const mergedCsv = makeCsvFromNormalized(merged);
+        setStatus("Schreibe CSV nach GitHub ...");
+        await putFile(owner, repo, path, branch, token, mergedCsv, sha);
+        setStatus(
+          "GitHub-Speicherung erfolgreich.
+" +
+          "Die Workflow-Datei im Repository erzeugt im nächsten Schritt automatisch die Excel-Datei in auswertung/auswertung.xlsx."
+        );
+      } catch (err) {
+        console.error(err);
+        setStatus("Fehler bei GitHub-Speicherung: " + (err.message || String(err)));
+      }
+    }
+
+    function rowKey(r) {
+      return [r.Datum, r.Titel, r.Kategorie, r.Wert, r.Einheit, r.Notiz].join("||");
+    }
+
+    function normalizeRows(rows) {
+      return rows
+        .map(r => ({
+          Datum: r.Datum || r.datum || "",
+          Titel: r.Titel || r.titel || "",
+          Kategorie: r.Kategorie || r.kategorie || "",
+          Wert: r.Wert || r.wert || "0",
+          Einheit: r.Einheit || r.einheit || "",
+          Notiz: r.Notiz || r.notiz || "",
+        }))
+        .filter(r => r.Titel);
+    }
+
+    function makeCsvFromNormalized(rows) {
+      const header = ["Datum", "Titel", "Kategorie", "Wert", "Einheit", "Notiz"];
+      const lines = [header.join(";")];
+      rows.forEach(r => {
+        lines.push([
+          escapeCsv(r.Datum),
+          escapeCsv(r.Titel),
+          escapeCsv(r.Kategorie),
+          escapeCsv(r.Wert),
+          escapeCsv(r.Einheit),
+          escapeCsv(r.Notiz),
+        ].join(";"));
+      });
+      return lines.join("
+");
+    }
+
+    function parseCsvSimple(csvText) {
+      if (!csvText || !csvText.trim()) return [];
+      const lines = csvText.replace(/\r/g, "").split("
+").filter(Boolean);
+      if (!lines.length) return [];
+      const headers = parseCsvLine(lines[0]);
+      return lines.slice(1).map(line => {
+        const cells = parseCsvLine(line);
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = cells[i] ?? "");
+        return obj;
+      });
+    }
+
+    function parseCsvLine(line) {
+      const out = [];
+      let cur = "";
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            cur += ch;
+          }
+        } else {
+          if (ch === ';') {
+            out.push(cur);
+            cur = "";
+          } else if (ch === '"') {
+            inQuotes = true;
+          } else {
+            cur += ch;
+          }
+        }
+      }
+      out.push(cur);
+      return out;
+    }
+
+    async function getExistingFile(owner, repo, path, branch, token) {
+      const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path}?ref=${encodeURIComponent(branch)}`;
+      const resp = await fetch(url, {
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
+      });
+
+      if (resp.status === 404) {
+        return { exists: false, sha: null, content: "" };
+      }
+
+      if (!resp.ok) {
+        throw new Error(`Lesen fehlgeschlagen (${resp.status})`);
+      }
+
+      const data = await resp.json();
+      let content = data.content || "";
+      if (data.encoding === "base64") {
+        content = decodeBase64Utf8(content.replace(/
+/g, ""));
       }
       return { exists: true, sha: data.sha, content };
     }
@@ -786,4 +1056,37 @@
     }
   </script>
 </body>
-</html>
+      const resp = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Schreiben fehlgeschlagen (${resp.status}): ${txt}`);
+      }
+
+      return resp.json();
+    }
+
+    function encodeBase64Utf8(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = "";
+      bytes.forEach(b => binary += String.fromCharCode(b));
+      return btoa(binary);
+    }
+
+    function decodeBase64Utf8(base64) {
+      const binary = atob(base64);
+      const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+  </script>
+</body>
+</body>
