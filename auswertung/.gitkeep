@@ -1,0 +1,44 @@
+name: Excel-Auswertung
+
+on:
+  push:
+    paths:
+      - daten/erfassung.csv
+      - scripts/build_excel.py
+      - .github/workflows/excel-auswertung.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-excel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl
+
+      - name: Ausgabeordner sicherstellen
+        run: mkdir -p auswertung
+
+      - name: Excel erzeugen
+        run: python scripts/build_excel.py
+
+      - name: Änderungen committen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add auswertung/auswertung.xlsx
+          git diff --cached --quiet || git commit -m "Excel-Auswertung aktualisiert"
+          git push
